@@ -19,3 +19,33 @@ Confirms the core motivation for Phase 1's batching work.
 **Bug found + fixed along the way:** BatchGenerator doesn't auto-respect
 EOS tokens like generate() does - stop_tokens must be passed explicitly as
 Sequence[Sequence[int]] (list of single-token-lists, not a flat list).
+
+## 2026-09-12 — Session: batching server working
+
+Built a real HTTP server using BatchGenerator, backed by a dedicated
+scheduler thread (queue.Queue + threading.Event pattern) since
+BatchGenerator isn't thread-safe for concurrent insert()/next() calls.
+
+Confirmed via server logs: two concurrent requests get admitted together
+and finish together, instead of one blocking the other (the naive
+single-threaded bottleneck from earlier this week).
+
+Learned: BatchGenerator doesn't auto-handle EOS tokens like generate()
+does — had to pass stop_tokens explicitly as list-of-single-token-lists.
+
+
+# Experiment: 8 concurrent requests load test
+
+**Hypothesis:** the batching server scales throughput roughly linearly
+with concurrent requests, not just for 2 at a time.
+
+**Method:** 8 distinct prompts, max_tokens=100 each, fired concurrently
+via ThreadPoolExecutor against the running server.
+
+**Result:** all 8 completed in 6.40s combined. Naive sequential estimate:
+~51.22s. ~8x speedup.
+
+**Caveat:** ThreadPoolExecutor.map reports results in submission order
+once ALL are complete, so per-request timing here isn't precise -
+this measures combined throughput, not individual latency. A proper
+per-request latency breakdown is Phase 2's job (telemetry).
